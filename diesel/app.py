@@ -5,6 +5,8 @@ from OpenSSL import SSL
 import socket
 import traceback
 import errno
+import os
+
 from greenlet import greenlet
 
 from diesel.hub import EventHub
@@ -120,7 +122,7 @@ class Application(object):
         pass
 
 class Service(object):
-    '''A TCP service listening on a certain port, with a protocol 
+    '''A TCP service listening on a certain port, with a protocol
     implemented by a passed connection handler.
     '''
     LQUEUE_SIZ = 500
@@ -138,7 +140,7 @@ class Service(object):
         self.ssl_ctx = ssl_ctx
 
     def handle_cannot_bind(self, reason):
-        log.critical("service at {0}:{1} cannot bind: {2}", 
+        log.critical("service at {0}:{1} cannot bind: {2}",
             self.iface or '*', self.port, reason)
         raise
 
@@ -151,16 +153,20 @@ class Service(object):
         )
 
     def bind_and_listen(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.setblocking(0)
+        if self.port == -1:
+            fd = os.environ['CHAUSSETTE_FD']
+            sock = socket.fromfd(int(fd), socket.AF_INET6, socket.SOCK_STREAM)
+        else:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setblocking(0)
+            try:
+                sock.bind((self.iface, self.port))
+            except socket.error, e:
+                self.handle_cannot_bind(str(e))
 
-        try:
-            sock.bind((self.iface, self.port))
-        except socket.error, e:
-            self.handle_cannot_bind(str(e))
+            sock.listen(self.LQUEUE_SIZ)
 
-        sock.listen(self.LQUEUE_SIZ)
         self.sock = sock
         self.port = sock.getsockname()[1] # in case of 0 binds
 
